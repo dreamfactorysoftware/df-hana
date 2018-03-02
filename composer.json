@@ -1,0 +1,50 @@
+{
+  "name":        "dreamfactory/df-sqlanywhere",
+  "description": "The DreamFactory(tm) SQL Anywhere DB Service.",
+  "keywords":    [
+    "dreamfactory",
+    "api",
+    "rest",
+    "sap",
+    "sql",
+    "database",
+    "db",
+    "hana"
+  ],
+  "homepage":    "https://www.dreamfactory.com/",
+  "license":     "proprietary",
+  "authors":     [
+    {
+      "name":  "Arif Islam",
+      "email": "arifislam@dreamfactory.com"
+    },
+    {
+      "name":  "Lee Hicks",
+      "email": "leehicks@dreamfactory.com"
+    }
+  ],
+  "support":     {
+    "email":  "dspsupport@dreamfactory.com",
+    "source": "https://github.com/dreamfactorysoftware/df-sqlanywhere",
+    "issues": "https://github.com/dreamfactorysoftware/df-sqlanywhere/issues",
+    "wiki":   "https://wiki.dreamfactory.com"
+  },
+  "require":     {
+    "dreamfactory/df-sqldb": "~0.15.1"
+  },
+  "autoload":    {
+    "psr-4": {
+      "DreamFactory\\Core\\SqlAnywhere\\": "src/"
+    }
+  },
+  "extra":       {
+    "branch-alias": {
+      "dev-develop": "0.1.x-dev"
+    },
+    "laravel": {
+      "providers": [
+        "DreamFactory\\Core\\HANA\\ServiceProvider"
+      ]
+    }
+  }
+}
