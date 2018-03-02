@@ -1,6 +1,6 @@
 {
-  "name":        "dreamfactory/df-sqlanywhere",
-  "description": "The DreamFactory(tm) SQL Anywhere DB Service.",
+  "name":        "dreamfactory/df-hana",
+  "description": "The DreamFactory(tm) SAP HANA DB Service.",
   "keywords":    [
     "dreamfactory",
     "api",
@@ -34,7 +34,7 @@
   },
   "autoload":    {
     "psr-4": {
-      "DreamFactory\\Core\\SqlAnywhere\\": "src/"
+      "DreamFactory\\Core\\Hana\\": "src/"
     }
   },
   "extra":       {
@@ -43,7 +43,7 @@
     },
     "laravel": {
       "providers": [
-        "DreamFactory\\Core\\HANA\\ServiceProvider"
+        "DreamFactory\\Core\\Hana\\ServiceProvider"
       ]
     }
   }
