@@ -18,4 +18,24 @@ class HanaDbConfig extends SqlDbConfig
     {
         return 39015;
     }
+
+    protected function getConnectionFields()
+    {
+        $fields = parent::getConnectionFields();
+
+        return array_merge($fields, ['odbc_driver']);
+    }
+
+    public static function getDefaultConnectionInfo()
+    {
+        $defaults = parent::getDefaultConnectionInfo();
+        $defaults[] = [
+            'name'        => 'odbc_driver',
+            'label'       => 'ODBC Driver',
+            'type'        => 'string',
+            'description' => 'Optional ODBC driver name or path, defaults to /usr/sap/hdbclient/libodbcHDB.so.'
+        ];
+
+        return $defaults;
+    }
 }

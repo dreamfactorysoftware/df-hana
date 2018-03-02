@@ -14,8 +14,8 @@ class HanaConnector extends Connector implements ConnectorInterface
         PDO::ATTR_CASE => PDO::CASE_NATURAL,
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_ORACLE_NULLS => PDO::NULL_NATURAL,
-        PDO::ATTR_STRINGIFY_FETCHES => true,
-        PDO::ATTR_EMULATE_PREPARES => true,
+        PDO::ATTR_STRINGIFY_FETCHES => false,
+        PDO::ATTR_EMULATE_PREPARES => false,
     ];
 
     /**
@@ -62,10 +62,10 @@ class HanaConnector extends Connector implements ConnectorInterface
 
         $dsn = "odbc:";
 
-        if (empty($driverName)) {
-            $driverName = "/usr/sap/hdbclient/libodbcHDB.so";
+        if (empty($odbc_driver)) {
+            $odbc_driver = "/usr/sap/hdbclient/libodbcHDB.so";
         }
-        $dsn .= "Driver={$driverName};";
+        $dsn .= "Driver={$odbc_driver};";
         if (!empty($host)) {
             $dsn .= "ServerNode={$host}";
             if (!empty($port)) {

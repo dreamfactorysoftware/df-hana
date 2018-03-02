@@ -2,8 +2,6 @@
 
 namespace DreamFactory\Core\Hana\Database\Schema;
 
-use DreamFactory\Core\Database\Enums\DbFunctionUses;
-use DreamFactory\Core\Database\Enums\FunctionTypes;
 use DreamFactory\Core\Database\Schema\ColumnSchema;
 use DreamFactory\Core\Database\Schema\FunctionSchema;
 use DreamFactory\Core\Database\Schema\ParameterSchema;
