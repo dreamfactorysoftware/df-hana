@@ -36,13 +36,38 @@ class HanaSchema extends SqlSchema
      */
     protected function translateSimpleColumnTypes(array &$info)
     {
-        // override this in each schema class
+        /*
+         * <data_type> ::=
+         DATE
+         | TIME
+         | SECONDDATE
+         | TIMESTAMP
+         | TINYINT
+         | SMALLINT
+         | INTEGER
+         | BIGINT
+         | SMALLDECIMAL
+         | REAL
+         | DOUBLE
+         | TEXT
+         | BINTEXT
+         | VARCHAR [ (<unsigned_integer>) ]
+         | NVARCHAR [ (<unsigned_integer>) ]
+         | ALPHANUM [ (<unsigned_integer>) ]
+         | VARBINARY [ (<unsigned_integer>) ]
+         | SHORTTEXT [ (<unsigned_integer>) ]
+         | DECIMAL [ (<unsigned_integer> [, <unsigned_integer> ]) ]
+         | FLOAT [ (<unsigned_integer>) ]
+         | BOOLEAN
+
+        BLOB | CLOB | NCLOB
+         */
         $type = (isset($info['type'])) ? $info['type'] : null;
         switch ($type) {
             // some types need massaging, some need other required properties
             case 'pk':
             case DbSimpleTypes::TYPE_ID:
-                $info['type'] = 'int';
+                $info['type'] = 'integer';
                 $info['allow_null'] = false;
                 $info['auto_increment'] = true;
                 $info['is_primary_key'] = true;
@@ -50,7 +75,7 @@ class HanaSchema extends SqlSchema
 
             case 'fk':
             case DbSimpleTypes::TYPE_REF:
-                $info['type'] = 'int';
+                $info['type'] = 'integer';
                 $info['is_foreign_key'] = true;
                 // check foreign tables
                 break;
@@ -59,33 +84,32 @@ class HanaSchema extends SqlSchema
                 $info['type'] = 'timestamp';
                 $default = (isset($info['default'])) ? $info['default'] : null;
                 if (!isset($default)) {
-                    $info['default'] = ['expression' => 'CURRENT TIMESTAMP'];
+                    $info['default'] = ['expression' => 'CURRENT_TIMESTAMP'];
                 }
                 break;
             case DbSimpleTypes::TYPE_TIMESTAMP_ON_UPDATE:
                 $info['type'] = 'timestamp';
                 $default = (isset($info['default'])) ? $info['default'] : null;
                 if (!isset($default)) {
-                    $info['default'] = ['expression' => 'TIMESTAMP'];
+                    $info['default'] = ['expression' => 'CURRENT_TIMESTAMP'];
                 }
                 break;
             case DbSimpleTypes::TYPE_USER_ID:
             case DbSimpleTypes::TYPE_USER_ID_ON_CREATE:
             case DbSimpleTypes::TYPE_USER_ID_ON_UPDATE:
-                $info['type'] = 'int';
+                $info['type'] = 'integer';
                 break;
 
             case DbSimpleTypes::TYPE_BOOLEAN:
-                $info['type'] = 'bit';
+                $info['type'] = 'boolean';
                 $default = (isset($info['default'])) ? $info['default'] : null;
                 if (isset($default)) {
-                    // convert to bit 0 or 1, where necessary
-                    $info['default'] = (int)filter_var($default, FILTER_VALIDATE_BOOLEAN);
+                    $info['default'] = filter_var($default, FILTER_VALIDATE_BOOLEAN) ? 'TRUE' : 'FALSE';
                 }
                 break;
 
             case DbSimpleTypes::TYPE_INTEGER:
-                $info['type'] = 'int';
+                $info['type'] = 'integer';
                 break;
 
             case DbSimpleTypes::TYPE_DOUBLE:
@@ -93,15 +117,12 @@ class HanaSchema extends SqlSchema
                 $info['type_extras'] = '(53)';
                 break;
 
+            case DbSimpleTypes::TYPE_MONEY:
+                $info['type'] = 'decimal';
+                break;
+
             case DbSimpleTypes::TYPE_TEXT:
-                $info['type'] = 'long varchar';
-                break;
-            case 'ntext':
-                $info['type'] = 'long nvarchar';
-                break;
-            case 'image':
-                $info['type'] = 'varbinary';
-                $info['type_extras'] = '(max)';
+                $info['type'] = 'text';
                 break;
 
             case DbSimpleTypes::TYPE_STRING:
@@ -110,9 +131,7 @@ class HanaSchema extends SqlSchema
                 $national =
                     (isset($info['supports_multibyte'])) ? filter_var($info['supports_multibyte'],
                         FILTER_VALIDATE_BOOLEAN) : false;
-                if ($fixed) {
-                    $info['type'] = ($national) ? 'nchar' : 'char';
-                } elseif ($national) {
+                if ($national) {
                     $info['type'] = 'nvarchar';
                 } else {
                     $info['type'] = 'varchar';
@@ -122,7 +141,7 @@ class HanaSchema extends SqlSchema
             case DbSimpleTypes::TYPE_BINARY:
                 $fixed =
                     (isset($info['fixed_length'])) ? filter_var($info['fixed_length'], FILTER_VALIDATE_BOOLEAN) : false;
-                $info['type'] = ($fixed) ? 'binary' : 'varbinary';
+                $info['type'] = ($fixed) ? 'blob' : 'varbinary';
                 break;
         }
     }
@@ -133,22 +152,11 @@ class HanaSchema extends SqlSchema
         $type = (isset($info['type'])) ? $info['type'] : null;
         switch ($type) {
             // some types need massaging, some need other required properties
-            case 'bit':
             case 'tinyint':
             case 'smallint':
             case 'int':
+            case 'integer':
             case 'bigint':
-                if (!isset($info['type_extras'])) {
-                    $length =
-                        (isset($info['length']))
-                            ? $info['length']
-                            : ((isset($info['precision'])) ? $info['precision']
-                            : null);
-                    if (!empty($length)) {
-                        $info['type_extras'] = "($length)"; // sets the viewable length
-                    }
-                }
-
                 $default = (isset($info['default'])) ? $info['default'] : null;
                 if (isset($default) && is_numeric($default)) {
                     $info['default'] = intval($default);
@@ -156,9 +164,6 @@ class HanaSchema extends SqlSchema
                 break;
 
             case 'decimal':
-            case 'numeric':
-            case 'money':
-            case 'smallmoney':
                 if (!isset($info['type_extras'])) {
                     $length =
                         (isset($info['length']))
@@ -180,7 +185,6 @@ class HanaSchema extends SqlSchema
                     $info['default'] = floatval($default);
                 }
                 break;
-            case 'real':
             case 'float':
                 if (!isset($info['type_extras'])) {
                     $length =
@@ -255,16 +259,17 @@ class HanaSchema extends SqlSchema
                     $definition .= ' DEFAULT ' . $expression;
                 }
             } else {
-                $default = $this->quoteValue($default);
+                if (0 !== strcasecmp('boolean', $type)) {
+                    $default = $this->quoteValue($default);
+                }
                 $definition .= ' DEFAULT ' . $default;
             }
         }
 
         $auto = (isset($info['auto_increment'])) ? filter_var($info['auto_increment'], FILTER_VALIDATE_BOOLEAN) : false;
         if ($auto) {
-            $definition .= ' IDENTITY';
+            $definition .= ' GENERATED BY DEFAULT AS IDENTITY (START WITH 1 INCREMENT BY 1)';
         }
-
         $isUniqueKey = (isset($info['is_unique'])) ? filter_var($info['is_unique'], FILTER_VALIDATE_BOOLEAN) : false;
         $isPrimaryKey =
             (isset($info['is_primary_key'])) ? filter_var($info['is_primary_key'], FILTER_VALIDATE_BOOLEAN) : false;
@@ -343,6 +348,7 @@ MYSQL;
             $c = new ColumnSchema(['name' => $column['column_name']]);
             $c->quotedName = $this->quoteColumnName($c->name);
             $c->allowNull = $column['is_nullable'] == 'TRUE';
+            $c->autoIncrement = (false !== stripos($column['generation_type'], ' AS IDENTITY'));
             $c->dbType = $column['data_type_name'];
             $c->scale = intval($column['scale']);
             $c->precision = $c->size = intval($column['length']);
