@@ -7,6 +7,7 @@ use Illuminate\Database\Connectors\Connector;
 use Illuminate\Database\Connectors\ConnectorInterface;
 use Exception;
 use PDO;
+use Log;
 
 class HanaConnector extends Connector implements ConnectorInterface
 {
@@ -28,15 +29,26 @@ class HanaConnector extends Connector implements ConnectorInterface
     public function connect(array $config)
     {
         $dsn = $this->getDsn($config);
+//        Log::debug('HANA Config:', $dsn);
         $options = $this->getOptions($config);
 
         return $this->createConnection($dsn, $config, $options);
     }
 
+    /**
+     * Create a new PDO connection.
+     *
+     * @param  string $dsn
+     * @param  array  $config
+     * @param  array  $options
+     * @return \PDO
+     * @throws \Exception
+     */
     public function createConnection($dsn, array $config, array $options)
     {
-        list($username, $password) = [
-            $config['username'] ?? null, $config['password'] ?? null,
+        [$username, $password] = [
+            $config['username'] ?? null,
+            $config['password'] ?? null,
         ];
 
         try {
@@ -51,40 +63,40 @@ class HanaConnector extends Connector implements ConnectorInterface
     }
 
     /**
-     * Create a DSN string from a configuration.
+     * Create a DSN string from configuration.
      *
      * @param  array $config
      * @return string
      */
     protected function getDsn(array $config)
     {
+        Log::debug('Handling database connection details.');
         extract($config, EXTR_SKIP);
 
-        $dsn = "odbc:";
+        $dsn = 'odbc:';
 
-        if (empty($odbc_driver)) {
-            $odbc_driver = "/usr/sap/hdbclient/libodbcHDB.so";
-        }
+        $odbc_driver = $odbc_driver ?? '/usr/sap/hdbclient/libodbcHDB.so';
         $dsn .= "Driver={$odbc_driver};";
+
         if (!empty($host)) {
             $dsn .= "ServerNode={$host}";
-            if (!empty($port)) {
-                $dsn .= ":{$port};";
-            } else {
-                $dsn .= ';';
-            }
+            $dsn .= !empty($port) ? ":{$port};" : ';';
         }
+
         if (!empty($database)) {
             $dsn .= "DATABASE={$database};";
         }
+
         if (!empty($username)) {
             $dsn .= "Uid={$username};";
         }
+
         if (!empty($password)) {
             $dsn .= "Pwd={$password};";
         }
-        $dsn .= 'CHAR_AS_UTF8=true';
 
+        $dsn .= 'CHAR_AS_UTF8=true';
+        Log::debug('configuring dsn: ' . $dsn);
 
         return $dsn;
     }

@@ -30,7 +30,7 @@
     "wiki":   "https://wiki.dreamfactory.com"
   },
   "require":     {
-    "dreamfactory/df-sqldb": "~0.17.4"
+    "dreamfactory/df-sqldb": "~1.2"
   },
   "autoload":    {
     "psr-4": {

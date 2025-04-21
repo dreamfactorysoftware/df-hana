@@ -3,10 +3,11 @@
 namespace DreamFactory\Core\Hana\Pdo\Odbc;
 
 use DreamFactory\Core\Hana\Pdo\PdoOdbc;
+use Exception;
 use PDO;
 use PDOStatement;
 use DreamFactory\Core\Hana\Pdo\Odbc\Exceptions\PdoOdbcException;
-
+use Log;
 /**
  * PdoOdbc Statement class to mimic the interface of the PDOStatement class
  * This class extends PDOStatement but overrides all of its methods. It does
@@ -137,6 +138,7 @@ class Statement extends PDOStatement
      */
     public function execute($inputParams = null)
     {
+        Log::debug('Executing ODBC statement');
         // Set up bound parameters, if passed in.
         if (is_array($inputParams)) {
             foreach ($inputParams as $key => $value) {
@@ -402,7 +404,7 @@ class Statement extends PDOStatement
      */
     public function bindParam($parameter, &$variable, $dataType = PDO::PARAM_STR, $maxLength = -1, $options = null)
     {
-        // strip INOUT type for oci
+        // Strip INOUT type for OCI (not needed for SAP HANA)
         $dataType &= ~PDO::PARAM_INPUT_OUTPUT;
 
         // Replace the first @PdoOdbcparam to a pseudo named parameter
@@ -410,76 +412,57 @@ class Statement extends PDOStatement
             $parameter = ':p' . $parameter;
         }
 
-        // Adapt the type
+        // Adapt the type for SAP HANA (Using PDO constants)
         switch ($dataType) {
             case PDO::PARAM_BOOL:
-                $odbcType = SQLT_INT;
+                // For boolean types, just use PDO's native BOOL type
                 break;
 
             case PDO::PARAM_NULL:
-                $odbcType = SQLT_CHR;
+                // Handle NULL type, no need for special ODBC constants
                 break;
 
             case PDO::PARAM_INT:
-                $odbcType = SQLT_INT;
+                // Handle integer type with PDO's native PARAM_INT
                 break;
 
             case PDO::PARAM_STR:
-                $odbcType = SQLT_CHR;
+                // For strings, PDO will handle this natively
                 break;
 
             case PDO::PARAM_LOB:
-                $odbcType = OCI_B_BLOB;
-
+                // Handle BLOB/CLOB data types (large objects) with PDO::PARAM_LOB
                 $this->blobBindings[$parameter] = $variable;
-
-                $variable = $this->connection->getNewDescriptor();
-
+                $variable = $this->connection->getNewDescriptor();  // Assuming custom handling of LOBs
                 $this->blobObjects[$parameter] = &$variable;
                 break;
 
             case PDO::PARAM_STMT:
-                $odbcType = OCI_B_CURSOR;
-
-                // Result sets require a cursor
-                $variable = $this->connection->getNewCursor();
-                break;
-
-            case SQLT_NTY:
-                $odbcType = SQLT_NTY;
-
-                $schema = isset($options['schema']) ? $options['schema'] : '';
-                $type_name = isset($options['type_name']) ? $options['type_name'] : '';
-
-                // set params required to use custom type.
-                $variable = $this->connection->getNewCollection($type_name, $schema);
-                break;
-
-            case SQLT_CLOB:
-                $odbcType = OCI_B_CLOB;
-
-                $this->blobBindings[$parameter] = $variable;
-
-                $variable = $this->connection->getNewDescriptor();
-
-                $this->blobObjects[$parameter] = &$variable;
+                // Handling cursors or result sets (if applicable)
                 break;
 
             default:
-                $odbcType = SQLT_CHR;
+                // Fallback to string if the type is not supported
+                $dataType = PDO::PARAM_STR;
                 break;
         }
 
         if (is_array($variable)) {
-            return $this->bindArray($parameter, $variable, count($variable), $maxLength, $odbcType);
+            // Handle arrays, if needed (custom implementation based on your use case)
+            return $this->bindArray($parameter, $variable, count($variable), $maxLength, $dataType);
         }
 
-        $this->bindings[] = &$variable;
+        // Ensure that $this->sth is a valid PDOStatement object
+        if (!$this->sth instanceof PDOStatement) {
+            throw new Exception('The prepared statement is not valid.');
+        }
 
-        return true;
-
-        return odbc_bind_by_name($this->sth, $parameter, $variable, $maxLength, $odbcType);
+        // Binding the parameter using PDO's built-in bindParam
+        return $this->sth->bindParam($parameter, $variable, $dataType, $maxLength);
     }
+
+
+
 
     /**
      * Special non-PDO function that binds an array parameter to the specified variable name.
@@ -579,20 +562,20 @@ class Statement extends PDOStatement
      *                             set. The array represents each row as either an array of column values
      *                             or an object with properties corresponding to each column name.
      */
-    public function fetchAll($fetchMode = null, $fetchArgument = null, $ctorArgs = [])
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, ...$args): array
     {
-        if (is_null($fetchMode)) {
-            $fetchMode = $this->fetchMode;
+        // Set the fetch mode if necessary
+        if ($mode !== PDO::FETCH_DEFAULT) {
+            $this->setFetchMode($mode, ...$args);
         }
-
-        $this->setFetchMode($fetchMode, $fetchArgument, $ctorArgs);
 
         $this->results = [];
         while ($row = $this->fetch()) {
+            // Handle nested resources if necessary
             if ((is_array($row) || is_object($row)) && is_resource(reset($row))) {
                 $stmt = new Statement(reset($row), $this->connection, $this->options);
                 $stmt->execute();
-                $stmt->setFetchMode($fetchMode, $fetchArgument, $ctorArgs);
+                $stmt->setFetchMode($mode, ...$args);
                 while ($rs = $stmt->fetch()) {
                     $this->results[] = $rs;
                 }
@@ -603,6 +586,7 @@ class Statement extends PDOStatement
 
         return $this->results;
     }
+
 
     /**
      * Fetches the next row and returns it as an object.
@@ -745,57 +729,61 @@ class Statement extends PDOStatement
      * @throws PdoOdbcException
      * @return bool TRUE on success or FALSE on failure.
      */
-    public function setFetchMode($fetchMode, $modeArg = null, $ctorArgs = [])
+    public function setFetchMode($mode, $className = null, ...$params): bool
     {
         // See which fetch mode we have
-        switch ($fetchMode) {
+        switch ($mode) {
             case PDO::FETCH_ASSOC:
             case PDO::FETCH_NUM:
             case PDO::FETCH_BOTH:
             case PDO::FETCH_OBJ:
-                $this->fetchMode = $fetchMode;
+                $this->fetchMode = $mode;
                 $this->fetchColNo = 0;
                 $this->fetchClassName = '\stdClass';
                 $this->fetchCtorArgs = [];
                 $this->fetchIntoObject = null;
                 break;
+
             case PDO::FETCH_CLASS:
             case PDO::FETCH_CLASS | PDO::FETCH_PROPS_LATE:
-                $this->fetchMode = $fetchMode;
+                $this->fetchMode = $mode;
                 $this->fetchColNo = 0;
                 $this->fetchClassName = '\stdClass';
-                if ($modeArg) {
-                    $this->fetchClassName = $modeArg;
+                if ($className) {
+                    $this->fetchClassName = $className;
                 }
-                $this->fetchCtorArgs = $ctorArgs;
+                $this->fetchCtorArgs = $params;  // Use the ...$params to capture constructor arguments
                 $this->fetchIntoObject = null;
                 break;
+
             case PDO::FETCH_INTO:
-                if (!is_object($modeArg)) {
-                    throw new PdoOdbcException(
-                        '$modeArg must be instance of an object');
+                if (!is_object($className)) {
+                    throw new PdoOdbcException('$className must be an instance of an object');
                 }
-                $this->fetchMode = $fetchMode;
+                $this->fetchMode = $mode;
                 $this->fetchColNo = 0;
                 $this->fetchClassName = '\stdClass';
                 $this->fetchCtorArgs = [];
-                $this->fetchIntoObject = $modeArg;
+                $this->fetchIntoObject = $className;
                 break;
+
             case PDO::FETCH_COLUMN:
-                $this->fetchMode = $fetchMode;
-                $this->fetchColNo = (int)$modeArg;
+                $this->fetchMode = $mode;
+                $this->fetchColNo = (int)$className; // For column fetch, the column index is passed in $className
                 $this->fetchClassName = '\stdClass';
                 $this->fetchCtorArgs = [];
                 $this->fetchIntoObject = null;
                 break;
+
             default:
-                throw new PdoOdbcException("Requested fetch mode is not supported " .
-                    "by this implementation");
+                throw new PdoOdbcException("Requested fetch mode is not supported by this implementation");
                 break;
         }
 
         return true;
     }
+
+
 
     /**
      * Advances to the next rowset in a multi-rowset statement handle.

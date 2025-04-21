@@ -5,7 +5,7 @@ namespace DreamFactory\Core\Hana\Pdo;
 use PDO;
 use DreamFactory\Core\Hana\Pdo\Odbc\Exceptions\PdoOdbcException;
 use DreamFactory\Core\Hana\Pdo\Odbc\Statement;
-
+use Log;
 /**
  * Oci8 class to mimic the interface of the PDO class
  * This class extends PDO but overrides all of its methods. It does this so
@@ -231,16 +231,32 @@ class PdoOdbc extends PDO
      * @param array|null $ctorArgs  Constructor arguments.
      * @return Statement
      */
-    public function query($statement, $fetchMode = null, $modeArg = null, array $ctorArgs = [])
+    public function query(string $statement, ?int $fetchMode = null, ...$fetchModeArgs)
     {
+        // Prepare the statement
         $stmt = $this->prepare($statement);
-        $stmt->execute();
-        if ($fetchMode) {
-            $stmt->setFetchMode($fetchMode, $modeArg, $ctorArgs);
+
+        // Execute the prepared statement
+        if (!$stmt->execute()) {
+            // Handle the error if execution fails
+            throw new \Exception('Query failed: ' . implode(' ', $stmt->errorInfo()));
         }
 
+        // Set fetch mode if specified
+        if ($fetchMode !== null) {
+            if ($fetchMode == PDO::FETCH_CLASS) {
+                // If fetching as class, include the $fetchModeArgs (class name, constructor args)
+                $stmt->setFetchMode($fetchMode, ...$fetchModeArgs);
+            } else {
+                // Default fetch mode (e.g., FETCH_ASSOC, FETCH_OBJ)
+                $stmt->setFetchMode($fetchMode);
+            }
+        }
+
+        // Return the statement object (can be used to fetch results)
         return $stmt;
     }
+
 
     /**
      * returns the current value of the sequence related to the table where
