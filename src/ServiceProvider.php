@@ -20,7 +20,7 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
     {
         // Add our database drivers.
         $this->app->resolving('db', function (DatabaseManager $db) {
-            $db->extend('hana', function ($config) {
+            $db->extend('odbc', function ($config) {
                 $connector = new HanaConnector();
                 $connection = $connector->connect($config);
 
@@ -45,9 +45,9 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
             );
         });
 
-        // Add our database extensions.
-        $this->app->resolving('db.schema', function (DbSchemaExtensions $db) {
-            $db->extend('hana', function ($connection) {
+        $this->app->resolving('df.db.schema', function ($db) {
+            /** @var DatabaseManager $db */
+            $db->extend('odbc', function ($connection) {
                 return new HanaSchema($connection);
             });
         });

@@ -2,8 +2,6 @@
 
 namespace DreamFactory\Core\Hana\Database\Schema;
 
-use DreamFactory\Core\Database\Enums\DbFunctionUses;
-use DreamFactory\Core\Database\Enums\FunctionTypes;
 use DreamFactory\Core\Database\Schema\ColumnSchema;
 use DreamFactory\Core\Database\Schema\FunctionSchema;
 use DreamFactory\Core\Database\Schema\ParameterSchema;
@@ -12,7 +10,7 @@ use DreamFactory\Core\Database\Schema\RoutineSchema;
 use DreamFactory\Core\Database\Schema\TableSchema;
 use DreamFactory\Core\Enums\DbSimpleTypes;
 use DreamFactory\Core\SqlDb\Database\Schema\SqlSchema;
-
+use Log;
 /**
  * Schema is the class for retrieving metadata information from a MS SQL Server database.
  */
@@ -30,6 +28,7 @@ class HanaSchema extends SqlSchema
      */
     public function getDefaultSchema()
     {
+        Log::debug('HANASchema::getDefaultSchema()');
         return $this->getUserName();
     }
 
@@ -38,13 +37,38 @@ class HanaSchema extends SqlSchema
      */
     protected function translateSimpleColumnTypes(array &$info)
     {
-        // override this in each schema class
+        /*
+         * <data_type> ::=
+         DATE
+         | TIME
+         | SECONDDATE
+         | TIMESTAMP
+         | TINYINT
+         | SMALLINT
+         | INTEGER
+         | BIGINT
+         | SMALLDECIMAL
+         | REAL
+         | DOUBLE
+         | TEXT
+         | BINTEXT
+         | VARCHAR [ (<unsigned_integer>) ]
+         | NVARCHAR [ (<unsigned_integer>) ]
+         | ALPHANUM [ (<unsigned_integer>) ]
+         | VARBINARY [ (<unsigned_integer>) ]
+         | SHORTTEXT [ (<unsigned_integer>) ]
+         | DECIMAL [ (<unsigned_integer> [, <unsigned_integer> ]) ]
+         | FLOAT [ (<unsigned_integer>) ]
+         | BOOLEAN
+
+        BLOB | CLOB | NCLOB
+         */
         $type = (isset($info['type'])) ? $info['type'] : null;
         switch ($type) {
             // some types need massaging, some need other required properties
             case 'pk':
             case DbSimpleTypes::TYPE_ID:
-                $info['type'] = 'int';
+                $info['type'] = 'integer';
                 $info['allow_null'] = false;
                 $info['auto_increment'] = true;
                 $info['is_primary_key'] = true;
@@ -52,7 +76,7 @@ class HanaSchema extends SqlSchema
 
             case 'fk':
             case DbSimpleTypes::TYPE_REF:
-                $info['type'] = 'int';
+                $info['type'] = 'integer';
                 $info['is_foreign_key'] = true;
                 // check foreign tables
                 break;
@@ -61,33 +85,32 @@ class HanaSchema extends SqlSchema
                 $info['type'] = 'timestamp';
                 $default = (isset($info['default'])) ? $info['default'] : null;
                 if (!isset($default)) {
-                    $info['default'] = ['expression' => 'CURRENT TIMESTAMP'];
+                    $info['default'] = ['expression' => 'CURRENT_TIMESTAMP'];
                 }
                 break;
             case DbSimpleTypes::TYPE_TIMESTAMP_ON_UPDATE:
                 $info['type'] = 'timestamp';
                 $default = (isset($info['default'])) ? $info['default'] : null;
                 if (!isset($default)) {
-                    $info['default'] = ['expression' => 'TIMESTAMP'];
+                    $info['default'] = ['expression' => 'CURRENT_TIMESTAMP'];
                 }
                 break;
             case DbSimpleTypes::TYPE_USER_ID:
             case DbSimpleTypes::TYPE_USER_ID_ON_CREATE:
             case DbSimpleTypes::TYPE_USER_ID_ON_UPDATE:
-                $info['type'] = 'int';
+                $info['type'] = 'integer';
                 break;
 
             case DbSimpleTypes::TYPE_BOOLEAN:
-                $info['type'] = 'bit';
+                $info['type'] = 'boolean';
                 $default = (isset($info['default'])) ? $info['default'] : null;
                 if (isset($default)) {
-                    // convert to bit 0 or 1, where necessary
-                    $info['default'] = (int)filter_var($default, FILTER_VALIDATE_BOOLEAN);
+                    $info['default'] = filter_var($default, FILTER_VALIDATE_BOOLEAN) ? 'TRUE' : 'FALSE';
                 }
                 break;
 
             case DbSimpleTypes::TYPE_INTEGER:
-                $info['type'] = 'int';
+                $info['type'] = 'integer';
                 break;
 
             case DbSimpleTypes::TYPE_DOUBLE:
@@ -95,15 +118,12 @@ class HanaSchema extends SqlSchema
                 $info['type_extras'] = '(53)';
                 break;
 
+            case DbSimpleTypes::TYPE_MONEY:
+                $info['type'] = 'decimal';
+                break;
+
             case DbSimpleTypes::TYPE_TEXT:
-                $info['type'] = 'long varchar';
-                break;
-            case 'ntext':
-                $info['type'] = 'long nvarchar';
-                break;
-            case 'image':
-                $info['type'] = 'varbinary';
-                $info['type_extras'] = '(max)';
+                $info['type'] = 'text';
                 break;
 
             case DbSimpleTypes::TYPE_STRING:
@@ -112,9 +132,7 @@ class HanaSchema extends SqlSchema
                 $national =
                     (isset($info['supports_multibyte'])) ? filter_var($info['supports_multibyte'],
                         FILTER_VALIDATE_BOOLEAN) : false;
-                if ($fixed) {
-                    $info['type'] = ($national) ? 'nchar' : 'char';
-                } elseif ($national) {
+                if ($national) {
                     $info['type'] = 'nvarchar';
                 } else {
                     $info['type'] = 'varchar';
@@ -124,7 +142,7 @@ class HanaSchema extends SqlSchema
             case DbSimpleTypes::TYPE_BINARY:
                 $fixed =
                     (isset($info['fixed_length'])) ? filter_var($info['fixed_length'], FILTER_VALIDATE_BOOLEAN) : false;
-                $info['type'] = ($fixed) ? 'binary' : 'varbinary';
+                $info['type'] = ($fixed) ? 'blob' : 'varbinary';
                 break;
         }
     }
@@ -135,22 +153,11 @@ class HanaSchema extends SqlSchema
         $type = (isset($info['type'])) ? $info['type'] : null;
         switch ($type) {
             // some types need massaging, some need other required properties
-            case 'bit':
             case 'tinyint':
             case 'smallint':
             case 'int':
+            case 'integer':
             case 'bigint':
-                if (!isset($info['type_extras'])) {
-                    $length =
-                        (isset($info['length']))
-                            ? $info['length']
-                            : ((isset($info['precision'])) ? $info['precision']
-                            : null);
-                    if (!empty($length)) {
-                        $info['type_extras'] = "($length)"; // sets the viewable length
-                    }
-                }
-
                 $default = (isset($info['default'])) ? $info['default'] : null;
                 if (isset($default) && is_numeric($default)) {
                     $info['default'] = intval($default);
@@ -158,9 +165,6 @@ class HanaSchema extends SqlSchema
                 break;
 
             case 'decimal':
-            case 'numeric':
-            case 'money':
-            case 'smallmoney':
                 if (!isset($info['type_extras'])) {
                     $length =
                         (isset($info['length']))
@@ -182,7 +186,6 @@ class HanaSchema extends SqlSchema
                     $info['default'] = floatval($default);
                 }
                 break;
-            case 'real':
             case 'float':
                 if (!isset($info['type_extras'])) {
                     $length =
@@ -241,6 +244,8 @@ class HanaSchema extends SqlSchema
      */
     protected function buildColumnDefinition(array $info)
     {
+        Log::debug("buildColumnDefinition");
+
         $type = (isset($info['type'])) ? $info['type'] : null;
         $typeExtras = (isset($info['type_extras'])) ? $info['type_extras'] : null;
 
@@ -257,16 +262,17 @@ class HanaSchema extends SqlSchema
                     $definition .= ' DEFAULT ' . $expression;
                 }
             } else {
-                $default = $this->quoteValue($default);
+                if (0 !== strcasecmp('boolean', $type)) {
+                    $default = $this->quoteValue($default);
+                }
                 $definition .= ' DEFAULT ' . $default;
             }
         }
 
         $auto = (isset($info['auto_increment'])) ? filter_var($info['auto_increment'], FILTER_VALIDATE_BOOLEAN) : false;
         if ($auto) {
-            $definition .= ' IDENTITY';
+            $definition .= ' GENERATED BY DEFAULT AS IDENTITY (START WITH 1 INCREMENT BY 1)';
         }
-
         $isUniqueKey = (isset($info['is_unique'])) ? filter_var($info['is_unique'], FILTER_VALIDATE_BOOLEAN) : false;
         $isPrimaryKey =
             (isset($info['is_primary_key'])) ? filter_var($info['is_primary_key'], FILTER_VALIDATE_BOOLEAN) : false;
@@ -333,26 +339,37 @@ class HanaSchema extends SqlSchema
      */
     protected function loadTableColumns(TableSchema $table)
     {
-        $params = [$table->schemaName, $table->resourceName];
-        $sql = <<<MYSQL
-SELECT column_name, position, data_type_name, offset, length, scale, is_nullable, default_value, comments, generation_type 
-FROM SYS.TABLE_COLUMNS WHERE schema_name = ? AND table_name = ?
-MYSQL;
+        $schema = strtoupper(trim($table->schemaName));
+        $tableName = strtoupper(trim($table->resourceName));
 
-        $columns = $this->connection->select($sql, $params);
+        $sql = <<<HANA
+SELECT COLUMN_NAME, POSITION, DATA_TYPE_NAME, OFFSET, LENGTH, SCALE, IS_NULLABLE, DEFAULT_VALUE, GENERATION_TYPE
+FROM PUBLIC.TABLE_COLUMNS
+WHERE SCHEMA_NAME = '{$schema}' AND TABLE_NAME = '{$tableName}'
+ORDER BY POSITION
+HANA;
+
+        Log::debug("Executing loadTableColumns with SQL: {$sql}");
+
+        $columns = $this->connection->select($sql);
+
         foreach ($columns as $column) {
             $column = array_change_key_case((array)$column, CASE_LOWER);
+
             $c = new ColumnSchema(['name' => $column['column_name']]);
             $c->quotedName = $this->quoteColumnName($c->name);
-            $c->allowNull = $column['is_nullable'] == 'TRUE';
+            $c->allowNull = $column['is_nullable'] === 'TRUE';
+            $c->autoIncrement = isset($column['generation_type']) &&
+                stripos($column['generation_type'], 'IDENTITY') !== false;
             $c->dbType = $column['data_type_name'];
-            $c->scale = intval($column['scale']);
-            $c->precision = $c->size = intval($column['length']);
-            $c->comment = $column['comments'];
+            $c->scale = (int) $column['scale'];
+            $c->precision = $c->size = (int) $column['length'];
+            $c->comment = null;
 
             $c->fixedLength = $this->extractFixedLength($c->dbType);
             $c->supportsMultibyte = $this->extractMultiByteSupport($c->dbType);
             $this->extractType($c, $c->dbType);
+
             if (isset($column['default_value'])) {
                 $this->extractDefault($c, $column['default_value']);
             }
@@ -360,30 +377,35 @@ MYSQL;
             if ($c->isPrimaryKey) {
                 if ($c->autoIncrement) {
                     $table->sequenceName = array_get($column, 'sequence', $c->name);
-                    if ((DbSimpleTypes::TYPE_INTEGER === $c->type)) {
+                    if (DbSimpleTypes::TYPE_INTEGER === $c->type) {
                         $c->type = DbSimpleTypes::TYPE_ID;
                     }
                 }
                 $table->addPrimaryKey($c->name);
             }
+
             $table->addColumn($c);
         }
     }
+
+
 
     /**
      * @inheritdoc
      */
     protected function getTableConstraints($schema = '')
     {
+        Log::debug('getTableConstraints');
+
         if (is_array($schema)) {
             $schema = implode("','", $schema);
         }
 
         $sql = <<<EOD
-SELECT constraint_name, schema_name as table_schema, table_name, column_name, is_primary_key, is_unique_key
-FROM sys.constraints 
-WHERE schema_name IN ('{$schema}')
-EOD;
+            SELECT constraint_name, schema_name as table_schema, table_name, column_name, is_primary_key, is_unique_key
+            FROM sys.constraints 
+            WHERE schema_name IN ('{$schema}')
+        EOD;
         $result = $this->connection->select($sql);
 
         $constraints = [];
@@ -422,6 +444,8 @@ EOD;
 
     public function getSchemas()
     {
+        Log::debug('getSchemas');
+
         $sql = <<<MYSQL
 SELECT SCHEMA_NAME FROM SYS.SCHEMAS WHERE HAS_PRIVILEGES = 'TRUE'
 MYSQL;
@@ -434,29 +458,36 @@ MYSQL;
      */
     protected function getTableNames($schema = '')
     {
-        $condition = "";
         $params = [];
+        $sql = "SELECT SCHEMA_NAME, TABLE_NAME FROM SYS.M_TABLES";
+
         if (!empty($schema)) {
-            $condition .= "schema_name = ?";
+            $sql .= " WHERE SCHEMA_NAME = '{$schema}'";
             $params[] = $schema;
         }
 
-        $sql = <<<MYSQL
-SELECT schema_name, table_name, comments FROM sys.tables WHERE {$condition} ORDER BY table_name
-MYSQL;
+        $sql .= " ORDER BY TABLE_NAME";
 
-        $rows = $this->connection->select($sql, $params);
+        Log::debug("Final SQL: " . $sql);
+        Log::debug("Params: " . json_encode($params));
+
+        // Avoid automatic substitution if DF is doing something weird
+        if (!empty($params)) {
+            $rows = $this->connection->select($sql);
+        } else {
+            $rows = $this->connection->select($sql);
+        }
 
         $names = [];
         foreach ($rows as $row) {
             $row = array_change_key_case((array)$row, CASE_LOWER);
-            $schemaName = isset($row['schema_name']) ? $row['schema_name'] : '';
-            $resourceName = isset($row['table_name']) ? $row['table_name'] : '';
+            $schemaName = $row['schema_name'] ?? '';
+            $resourceName = $row['table_name'] ?? '';
             $internalName = $schemaName . '.' . $resourceName;
             $name = $resourceName;
             $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
             $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
-            $settings['description'] = $row['comments'];
+            $settings['description'] = null;
             $names[strtolower($name)] = new TableSchema($settings);
         }
 
@@ -468,35 +499,37 @@ MYSQL;
      */
     protected function getViewNames($schema = '')
     {
-        $condition = "";
-        $params = [];
+        Log::debug('getViewNames');
+
+        $sql = "SELECT schema_name, view_name FROM sys.views";
         if (!empty($schema)) {
-            $condition .= "schema_name = ?";
-            $params[] = $schema;
+            $safeSchema = addslashes($schema); // escape just in case
+            $sql .= " WHERE schema_name = '{$safeSchema}'";
         }
 
-        $sql = <<<MYSQL
-SELECT schema_name, view_name, comments FROM sys.views WHERE {$condition} ORDER BY view_name
-MYSQL;
+        $sql .= " ORDER BY view_name";
 
-        $rows = $this->connection->select($sql, $params);
+        Log::debug("Final SQL: {$sql}");
+
+        $rows = $this->connection->select($sql); // No param binding
 
         $names = [];
         foreach ($rows as $row) {
             $row = array_change_key_case((array)$row, CASE_LOWER);
-            $schemaName = isset($row['schema_name']) ? $row['schema_name'] : '';
-            $resourceName = isset($row['view_name']) ? $row['view_name'] : '';
+            $schemaName = $row['schema_name'] ?? '';
+            $resourceName = $row['view_name'] ?? '';
             $internalName = $schemaName . '.' . $resourceName;
             $name = $resourceName;
             $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
             $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
             $settings['isView'] = true;
-            $settings['description'] = $row['comments'];
+            $settings['description'] = null; // sys.views likely doesn't have 'comments'
             $names[strtolower($name)] = new TableSchema($settings);
         }
 
         return $names;
     }
+
 
     /**
      * @inheritdoc
@@ -509,6 +542,7 @@ MYSQL;
             $where = 'WHERE schema_name = ?';
             $bindings[] = $schema;
         }
+        Log::debug('getProcedureNames');
 
         $sql = <<<MYSQL
 SELECT procedure_name FROM SYS.PROCEDURES {$where} ORDER BY procedure_name
@@ -536,6 +570,7 @@ MYSQL;
             $where = 'WHERE schema_name = ?';
             $bindings[] = $schema;
         }
+        Log::debug('getFunctionNames');
 
         $sql = <<<MYSQL
 SELECT function_name FROM SYS.FUNCTIONS {$where} ORDER BY function_name
@@ -563,6 +598,8 @@ MYSQL;
      */
     protected function loadParameters(RoutineSchema $holder)
     {
+        Log::debug('loadParameters');
+
         $sql = <<<MYSQL
 SELECT 
     parm_id, parmmode, parmname, parmtype, parmdomain, user_type, length, scale, "default"
@@ -651,6 +688,8 @@ MYSQL;
      */
     public function alterColumn($table, $column, $definition)
     {
+        Log::debug('alterColumn');
+
         $sql = <<<MYSQL
 ALTER TABLE $table ALTER COLUMN {$this->quoteColumnName($column)} {$this->getColumnType($definition)}
 MYSQL;

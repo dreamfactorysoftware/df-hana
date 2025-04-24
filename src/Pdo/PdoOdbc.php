@@ -5,7 +5,7 @@ namespace DreamFactory\Core\Hana\Pdo;
 use PDO;
 use DreamFactory\Core\Hana\Pdo\Odbc\Exceptions\PdoOdbcException;
 use DreamFactory\Core\Hana\Pdo\Odbc\Statement;
-
+use Log;
 /**
  * Oci8 class to mimic the interface of the PDO class
  * This class extends PDO but overrides all of its methods. It does this so
@@ -26,7 +26,7 @@ class PdoOdbc extends PDO
      *
      * @var array
      */
-    private $options = array();
+    private $options = [];
 
     /**
      * Whether currently in a transaction.
@@ -48,20 +48,20 @@ class PdoOdbc extends PDO
      * @param string $dsn
      * @param string $username
      * @param string $password
-     * @param array $options
+     * @param array  $options
      * @throws PdoOdbcException
      */
-    public function __construct($dsn, $username, $password, array $options = array())
+    public function __construct($dsn, $username, $password, array $options = [])
     {
         $charset = null;
-        $dsn     = preg_replace('/^odbc:/', '', $dsn);
-        $tokens  = preg_split('/;/', $dsn);
+        $dsn = preg_replace('/^odbc:/', '', $dsn);
+        $tokens = preg_split('/;/', $dsn);
 //        $dsn     = str_replace(['dbname=//', 'dbname='], '', $tokens[0]);
 
         //Find the charset in Connection String: oci:dbname=192.168.10.145/orcl;charset=CL8MSWIN1251
         $charset = $this->_getCharset($tokens);
         // OR Get charset from options
-        if (! $charset) {
+        if (!$charset) {
             $charset = $this->configureCharset($options);
         }
 
@@ -80,10 +80,10 @@ class PdoOdbc extends PDO
      * Prepares a statement for execution and returns a statement object
      *
      * @param string $statement This must be a valid SQL statement for the
-     *   target database server.
-     * @param array $options [optional] This array holds one or more key=>value
-     *   pairs to set attribute values for the PDOStatement object that this
-     *   method returns.
+     *                          target database server.
+     * @param array  $options   [optional] This array holds one or more key=>value
+     *                          pairs to set attribute values for the PDOStatement object that this
+     *                          method returns.
      * @throws PdoOdbcException
      * @return Statement
      */
@@ -94,18 +94,9 @@ class PdoOdbc extends PDO
             $options = $this->options;
         }
 
-//        // Skip replacing ? with a pseudo named parameter on alter/create table command
-//        if ($this->isNamedParameterable($statement)) {
-//            // Replace ? with a pseudo named parameter
-//            $parameter    = 0;
-//            $statement = preg_replace_callback('/(?:\'[^\']*\')(*SKIP)(*F)|\?/', function () use (&$parameter) {
-//                return ':p' . $parameter++;
-//            }, $statement);
-//        }
-
         // check if statement is insert function
-        if (strpos(strtolower($statement), 'insert into') !== false) {
-            preg_match('/insert into\s+([^\s\(]*)?/', strtolower($statement), $matches);
+        if (stripos($statement, 'insert into') !== false) {
+            preg_match('/insert into\s+([^\s\(]*)?/i', $statement, $matches);
             // store insert into table name
             $this->table = $matches[1];
         }
@@ -113,13 +104,13 @@ class PdoOdbc extends PDO
         // Prepare the statement
         $sth = odbc_prepare($this->dbh, $statement);
 
-        if (! $sth) {
+        if (!$sth) {
             $e = odbc_error($this->dbh);
             throw new PdoOdbcException($e['message']);
         }
 
-        if (! is_array($options)) {
-            $options = array();
+        if (!is_array($options)) {
+            $options = [];
         }
 
         return new Statement($sth, $this, $options);
@@ -187,7 +178,7 @@ class PdoOdbc extends PDO
      */
     public function rollBack()
     {
-        if (! $this->inTransaction()) {
+        if (!$this->inTransaction()) {
             throw new PdoOdbcException('There is no active transaction');
         }
 
@@ -203,7 +194,7 @@ class PdoOdbc extends PDO
     /**
      * Sets an attribute on the database handle.
      *
-     * @param int $attribute
+     * @param int   $attribute
      * @param mixed $value
      * @return bool TRUE on success or FALSE on failure.
      */
@@ -219,7 +210,7 @@ class PdoOdbc extends PDO
      *
      * @param string $statement The SQL statement to prepare and execute.
      * @return int The number of rows that were modified or deleted by the SQL
-     *   statement you issued.
+     *                          statement you issued.
      */
     public function exec($statement)
     {
@@ -233,23 +224,39 @@ class PdoOdbc extends PDO
      * Executes an SQL statement, returning the results as a
      * Yajra\Pdo\Oci8\Statement object.
      *
-     * @param string $statement The SQL statement to prepare and execute.
-     * @param int|null $fetchMode The fetch mode must be one of the
-     *   PDO::FETCH_* constants.
-     * @param mixed|null $modeArg Column number, class name or object.
-     * @param array|null $ctorArgs Constructor arguments.
+     * @param string     $statement The SQL statement to prepare and execute.
+     * @param int|null   $fetchMode The fetch mode must be one of the
+     *                              PDO::FETCH_* constants.
+     * @param mixed|null $modeArg   Column number, class name or object.
+     * @param array|null $ctorArgs  Constructor arguments.
      * @return Statement
      */
-    public function query($statement, $fetchMode = null, $modeArg = null, array $ctorArgs = array())
+    public function query(string $statement, ?int $fetchMode = null, ...$fetchModeArgs)
     {
+        // Prepare the statement
         $stmt = $this->prepare($statement);
-        $stmt->execute();
-        if ($fetchMode) {
-            $stmt->setFetchMode($fetchMode, $modeArg, $ctorArgs);
+
+        // Execute the prepared statement
+        if (!$stmt->execute()) {
+            // Handle the error if execution fails
+            throw new \Exception('Query failed: ' . implode(' ', $stmt->errorInfo()));
         }
 
+        // Set fetch mode if specified
+        if ($fetchMode !== null) {
+            if ($fetchMode == PDO::FETCH_CLASS) {
+                // If fetching as class, include the $fetchModeArgs (class name, constructor args)
+                $stmt->setFetchMode($fetchMode, ...$fetchModeArgs);
+            } else {
+                // Default fetch mode (e.g., FETCH_ASSOC, FETCH_OBJ)
+                $stmt->setFetchMode($fetchMode);
+            }
+        }
+
+        // Return the statement object (can be used to fetch results)
         return $stmt;
     }
+
 
     /**
      * returns the current value of the sequence related to the table where
@@ -266,15 +273,32 @@ class PdoOdbc extends PDO
     public function lastInsertId($sequence = null)
     {
         if (is_null($sequence)) {
-            $sequence = $this->table . "_id_seq";
+            $sequence = "id";
         }
 
-        if (! $this->checkSequence($sequence)) {
-            return 0;
+        $table = str_replace('"', '', $this->table);
+        $schema = '';
+        if (false !== $pos = strpos($table, '.')) {
+            $schema = strstr($table, '.', true);
+            $table = substr($table, $pos + 1);
         }
+        $stmt = $this->query(
+            "select column_id from table_columns where schema_name = '$schema' AND table_name = '$table' AND column_name = '$sequence'",
+            PDO::FETCH_COLUMN
+        );
+        $columnId = $stmt->fetch();
 
-        $stmt = $this->query("SELECT {$sequence}.CURRVAL FROM DUAL", PDO::FETCH_COLUMN);
-        $id   = $stmt->fetch();
+        $stmt = $this->query(
+            "select sequence_name from sequences where sequence_name like '%_{$columnId}_%'",
+            PDO::FETCH_COLUMN
+        );
+        $sequenceName = $stmt->fetch();
+
+        $stmt = $this->query(
+            "SELECT SYSTEM.{$sequenceName}.CURRVAL FROM DUMMY",
+            PDO::FETCH_COLUMN
+        );
+        $id = $stmt->fetch();
 
         return $id;
     }
@@ -311,14 +335,14 @@ class PdoOdbc extends PDO
         $e = odbc_error($this->dbh);
 
         if (is_array($e)) {
-            return array(
+            return [
                 'HY000',
                 $e['code'],
                 $e['message']
-            );
+            ];
         }
 
-        return array('00000', null, null);
+        return ['00000', null, null];
     }
 
     /**
@@ -388,11 +412,11 @@ class PdoOdbc extends PDO
      * faster to execute than interpolated queries, as both the server and
      * client side can cache a compiled form of the query.
      *
-     * @param string $string The string to be quoted.
-     * @param int $paramType Provides a data type hint for drivers that have
-     *   alternate quoting styles
+     * @param string $string    The string to be quoted.
+     * @param int    $paramType Provides a data type hint for drivers that have
+     *                          alternate quoting styles
      * @return string Returns a quoted string that is theoretically safe to pass
-     *   into an SQL statement.
+     *                          into an SQL statement.
      * @todo Implement support for $paramType.
      */
     public function quote($string, $paramType = PDO::PARAM_STR)
@@ -414,7 +438,7 @@ class PdoOdbc extends PDO
     {
         try {
             $stmt = $this->query(
-                "SELECT count(*) FROM ALL_SEQUENCES WHERE SEQUENCE_NAME=UPPER('{$name}') AND SEQUENCE_OWNER=UPPER(USER)",
+                "SELECT count(*) FROM SEQUENCES WHERE SEQUENCE_NAME=UPPER('{$name}') AND SEQUENCE_OWNER=UPPER(USER)",
                 PDO::FETCH_COLUMN
             );
 
@@ -432,8 +456,8 @@ class PdoOdbc extends PDO
      */
     private function isNamedParameterable($statement)
     {
-        return ! preg_match('/^alter+ +table/', strtolower(trim($statement)))
-        and ! preg_match('/^create+ +table/', strtolower(trim($statement)));
+        return !preg_match('/^alter+ +table/', strtolower(trim($statement)))
+            and !preg_match('/^create+ +table/', strtolower(trim($statement)));
     }
 
     /**
@@ -454,7 +478,7 @@ class PdoOdbc extends PDO
             $this->dbh = odbc_connect($dsn, $username, $password);
         }
 
-        if (! $this->dbh) {
+        if (!$this->dbh) {
             $e = odbc_error();
             throw new PdoOdbcException($e['message']);
         }
@@ -467,24 +491,25 @@ class PdoOdbc extends PDO
      *
      * @return charset
      */
-    private function _getCharset($charset=null)
+    private function _getCharset($charset = null)
     {
         if (!$charset) {
             return null;
         }
 
-        $expr   = '/^(charset=)(\w+)$/';
+        $expr = '/^(charset=)(\w+)$/';
         $tokens = array_filter(
             $charset, function ($token) use ($expr) {
             return preg_match($expr, $token, $matches);
         }
         );
-        if (sizeof($tokens)>0) {
+        if (sizeof($tokens) > 0) {
             preg_match($expr, array_shift($tokens), $matches);
             $_charset = $matches[2];
         } else {
             $_charset = null;
         }
+
         return $_charset;
     }
 
@@ -512,8 +537,8 @@ class PdoOdbc extends PDO
      * Allocates new collection object
      *
      * @param string $typeName Should be a valid named type (uppercase).
-     * @param string $schema Should point to the scheme, where the named type was created.
-     *  The name of the current user is the default value.
+     * @param string $schema   Should point to the scheme, where the named type was created.
+     *                         The name of the current user is the default value.
      * @return \OCI_Collection
      */
     public function getNewCollection($typeName, $schema)
