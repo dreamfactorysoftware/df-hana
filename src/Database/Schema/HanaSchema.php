@@ -345,13 +345,16 @@ class HanaSchema extends SqlSchema
         $sql = <<<HANA
 SELECT COLUMN_NAME, POSITION, DATA_TYPE_NAME, OFFSET, LENGTH, SCALE, IS_NULLABLE, DEFAULT_VALUE, GENERATION_TYPE
 FROM PUBLIC.TABLE_COLUMNS
-WHERE SCHEMA_NAME = '{$schema}' AND TABLE_NAME = '{$tableName}'
+WHERE SCHEMA_NAME = :schema AND TABLE_NAME = :name
 ORDER BY POSITION
 HANA;
 
         Log::debug("Executing loadTableColumns with SQL: {$sql}");
 
-        $columns = $this->connection->select($sql);
+        $columns = $this->connection->select($sql, [
+            ':schema' => $schema,
+            ':name'   => $tableName,
+        ]);
 
         foreach ($columns as $column) {
             $column = array_change_key_case((array)$column, CASE_LOWER);
@@ -397,16 +400,19 @@ HANA;
     {
         Log::debug('getTableConstraints');
 
-        if (is_array($schema)) {
-            $schema = implode("','", $schema);
+        $schemas = is_array($schema) ? array_values($schema) : [$schema];
+        $schemas = array_values(array_filter($schemas, fn ($s) => $s !== '' && $s !== null));
+        if (empty($schemas)) {
+            return [];
         }
+        $placeholders = implode(',', array_fill(0, count($schemas), '?'));
 
         $sql = <<<EOD
             SELECT constraint_name, schema_name as table_schema, table_name, column_name, is_primary_key, is_unique_key
-            FROM sys.constraints 
-            WHERE schema_name IN ('{$schema}')
+            FROM sys.constraints
+            WHERE schema_name IN ({$placeholders})
         EOD;
-        $result = $this->connection->select($sql);
+        $result = $this->connection->select($sql, $schemas);
 
         $constraints = [];
         foreach ($result as $row) {
@@ -427,9 +433,9 @@ HANA;
 SELECT constraint_name, schema_name AS table_schema, table_name, column_name,
     referenced_schema_name AS referenced_table_schema, referenced_table_name, referenced_column_name,
     update_rule, delete_rule
-FROM SYS.REFERENTIAL_CONSTRAINTS WHERE schema_name IN ('{$schema}')
+FROM SYS.REFERENTIAL_CONSTRAINTS WHERE schema_name IN ({$placeholders})
 EOD;
-        $result = $this->connection->select($sql);
+        $result = $this->connection->select($sql, $schemas);
         foreach ($result as $row) {
             $row = array_change_key_case((array)$row, CASE_LOWER);
             $ts = strtolower($row['table_schema']);
@@ -458,25 +464,19 @@ MYSQL;
      */
     protected function getTableNames($schema = '')
     {
-        $params = [];
+        $bindings = [];
         $sql = "SELECT SCHEMA_NAME, TABLE_NAME FROM SYS.M_TABLES";
 
         if (!empty($schema)) {
-            $sql .= " WHERE SCHEMA_NAME = '{$schema}'";
-            $params[] = $schema;
+            $sql .= " WHERE SCHEMA_NAME = :schema";
+            $bindings[':schema'] = $schema;
         }
 
         $sql .= " ORDER BY TABLE_NAME";
 
         Log::debug("Final SQL: " . $sql);
-        Log::debug("Params: " . json_encode($params));
 
-        // Avoid automatic substitution if DF is doing something weird
-        if (!empty($params)) {
-            $rows = $this->connection->select($sql);
-        } else {
-            $rows = $this->connection->select($sql);
-        }
+        $rows = $this->connection->select($sql, $bindings);
 
         $names = [];
         foreach ($rows as $row) {
@@ -502,16 +502,19 @@ MYSQL;
         Log::debug('getViewNames');
 
         $sql = "SELECT schema_name, view_name FROM sys.views";
+        $bindings = [];
         if (!empty($schema)) {
-            $safeSchema = addslashes($schema); // escape just in case
-            $sql .= " WHERE schema_name = '{$safeSchema}'";
+            // addslashes is ineffective against HANA's double-quote-escape
+            // identifiers; use parameterized binding instead.
+            $sql .= " WHERE schema_name = :schema";
+            $bindings[':schema'] = $schema;
         }
 
         $sql .= " ORDER BY view_name";
 
         Log::debug("Final SQL: {$sql}");
 
-        $rows = $this->connection->select($sql); // No param binding
+        $rows = $this->connection->select($sql, $bindings);
 
         $names = [];
         foreach ($rows as $row) {
@@ -601,15 +604,20 @@ MYSQL;
         Log::debug('loadParameters');
 
         $sql = <<<MYSQL
-SELECT 
+SELECT
     parm_id, parmmode, parmname, parmtype, parmdomain, user_type, length, scale, "default"
-FROM 
+FROM
     SYS.SYSPROCPARMS
-WHERE 
-    procname = '{$holder->resourceName}' AND schema_name = '{$holder->schemaName}'
+WHERE
+    procname = :name AND schema_name = :schema
 MYSQL;
 
-        foreach ($this->connection->select($sql) as $row) {
+        $bindings = [
+            ':name'   => $holder->resourceName,
+            ':schema' => $holder->schemaName,
+        ];
+
+        foreach ($this->connection->select($sql, $bindings) as $row) {
             $row = array_change_key_case((array)$row, CASE_LOWER);
             $simpleType = static::extractSimpleType(array_get($row, 'parmdomain'));
             /*
