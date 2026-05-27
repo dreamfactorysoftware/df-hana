@@ -25,9 +25,16 @@ class HanaGrammar extends Grammar
     /**
      * Compile the query to determine if a table exists.
      *
+     * Laravel 13 widened this signature from no-args to ($schema, $table). The
+     * HANA override returns a parameterized SELECT that the caller binds with
+     * the supplied table value, preserving the prior behavior while staying
+     * compatible with the parent contract.
+     *
+     * @param  string|null  $schema
+     * @param  string  $table
      * @return string
      */
-    public function compileTableExists()
+    public function compileTableExists($schema, $table)
     {
         return "select * from sysobjects where type = 'U' and name = ?";
     }
