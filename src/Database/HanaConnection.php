@@ -70,7 +70,10 @@ class HanaConnection extends Connection
      */
     protected function getDefaultQueryGrammar()
     {
-        return $this->withTablePrefix(new QueryGrammar);
+        // Laravel 13 removed Connection::withTablePrefix(); the grammar now
+        // holds a reference back to its connection and asks it for the prefix
+        // on demand. Pass $this so wrapTable/getTablePrefix calls resolve.
+        return new QueryGrammar($this);
     }
 
     /**
@@ -80,7 +83,7 @@ class HanaConnection extends Connection
      */
     protected function getDefaultSchemaGrammar()
     {
-        return $this->withTablePrefix(new SchemaGrammar);
+        return new SchemaGrammar($this);
     }
 
     /**
